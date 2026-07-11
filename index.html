@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Peer Sync</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Peer Sync</h1>
+        <p id="engine-status" class="status">checking engine…</p>
+      </header>
+
+      <section>
+        <button id="pick-folder">Choose a folder</button>
+        <p id="folder-path" class="muted"></p>
+      </section>
+
+      <section>
+        <h2>Files</h2>
+        <ul id="file-list"></ul>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
