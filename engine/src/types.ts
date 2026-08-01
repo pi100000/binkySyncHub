@@ -43,7 +43,8 @@ export interface DiffResult {
 export interface Peer {
   id: string;
   displayName: string;
-  /** "lan" = direct mDNS discovery, "relay" = reachable only via relay */
+  /** "lan" = direct discovery, "relay" = reachable only via relay */
   reachability: "lan" | "relay";
-  address?: string; // host:port, only set for "lan" peers
+  /** Full base URL, e.g. "http://192.168.1.23:4021" */
+  address?: string;
 }

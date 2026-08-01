@@ -18,10 +18,30 @@ interface Manifest {
   entries: ManifestEntry[];
 }
 
+interface Peer {
+  id: string;
+  displayName: string;
+  reachability: "lan" | "relay";
+  address?: string;
+}
+
 const statusEl = document.querySelector<HTMLParagraphElement>("#engine-status")!;
-const pickButton = document.querySelector<HTMLButtonElement>("#pick-folder")!;
-const folderPathEl = document.querySelector<HTMLParagraphElement>("#folder-path")!;
-const fileListEl = document.querySelector<HTMLUListElement>("#file-list")!;
+
+const pickShareButton = document.querySelector<HTMLButtonElement>("#pick-share-folder")!;
+const sharePathEl = document.querySelector<HTMLParagraphElement>("#share-path")!;
+const shareFileListEl = document.querySelector<HTMLUListElement>("#share-file-list")!;
+
+const peerListEl = document.querySelector<HTMLUListElement>("#peer-list")!;
+
+const peerUrlInput = document.querySelector<HTMLInputElement>("#peer-url-input")!;
+const pickSyncButton = document.querySelector<HTMLButtonElement>("#pick-sync-folder")!;
+const syncPathEl = document.querySelector<HTMLParagraphElement>("#sync-path")!;
+const syncButton = document.querySelector<HTMLButtonElement>("#sync-button")!;
+const syncStatusEl = document.querySelector<HTMLParagraphElement>("#sync-status")!;
+
+let syncDestPath: string | null = null;
+
+// ---- engine health ----
 
 async function checkEngineHealth() {
   try {
@@ -35,18 +55,10 @@ async function checkEngineHealth() {
   }
 }
 
-async function buildManifest(folderPath: string): Promise<Manifest> {
-  const res = await fetch(`${ENGINE_URL}/manifest/build`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folderPath }),
-  });
-  if (!res.ok) throw new Error(`manifest build failed: ${res.status}`);
-  return res.json();
-}
+// ---- sharing ----
 
-function renderManifest(manifest: Manifest) {
-  fileListEl.innerHTML = "";
+function renderManifest(listEl: HTMLUListElement, manifest: Manifest) {
+  listEl.innerHTML = "";
   for (const entry of manifest.entries) {
     const li = document.createElement("li");
     const name = document.createElement("span");
@@ -55,23 +67,114 @@ function renderManifest(manifest: Manifest) {
     hash.className = "hash";
     hash.textContent = entry.hash.slice(0, 14) + "…";
     li.append(name, hash);
-    fileListEl.append(li);
+    listEl.append(li);
   }
 }
 
-pickButton.addEventListener("click", async () => {
+pickShareButton.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });
   if (!selected || Array.isArray(selected)) return;
 
-  folderPathEl.textContent = selected;
-  fileListEl.innerHTML = "<li>hashing…</li>";
+  sharePathEl.textContent = `Sharing: ${selected}`;
+  shareFileListEl.innerHTML = "<li>hashing…</li>";
 
   try {
-    const manifest = await buildManifest(selected);
-    renderManifest(manifest);
+    const res = await fetch(`${ENGINE_URL}/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderPath: selected }),
+    });
+    if (!res.ok) throw new Error(`share failed: ${res.status}`);
+    const { manifest } = (await res.json()) as { manifest: Manifest };
+    renderManifest(shareFileListEl, manifest);
   } catch (err) {
-    fileListEl.innerHTML = `<li>Error: ${(err as Error).message}</li>`;
+    shareFileListEl.innerHTML = `<li>Error: ${(err as Error).message}</li>`;
   }
 });
 
+// ---- peer discovery ----
+
+function renderPeers(peers: Peer[]) {
+  peerListEl.innerHTML = "";
+
+  if (peers.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "No one else found on this network yet…";
+    peerListEl.append(li);
+    return;
+  }
+
+  for (const peer of peers) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = peer.displayName;
+    const address = document.createElement("span");
+    address.className = "peer-address";
+    address.textContent = peer.address ?? "";
+    li.append(name, address);
+    li.addEventListener("click", () => {
+      if (peer.address) peerUrlInput.value = peer.address;
+      updateSyncButtonState();
+    });
+    peerListEl.append(li);
+  }
+}
+
+async function pollPeers() {
+  try {
+    const res = await fetch(`${ENGINE_URL}/peers`);
+    if (!res.ok) return;
+    const { peers } = (await res.json()) as { peers: Peer[] };
+    renderPeers(peers);
+  } catch {
+    // Engine's probably just not up yet — the health check above already
+    // surfaces that, no need to duplicate the error here.
+  }
+}
+
+// ---- syncing ----
+
+function updateSyncButtonState() {
+  syncButton.disabled = !(peerUrlInput.value.trim() && syncDestPath);
+}
+
+peerUrlInput.addEventListener("input", updateSyncButtonState);
+
+pickSyncButton.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected || Array.isArray(selected)) return;
+  syncDestPath = selected;
+  syncPathEl.textContent = `Destination: ${selected}`;
+  updateSyncButtonState();
+});
+
+syncButton.addEventListener("click", async () => {
+  const peerUrl = peerUrlInput.value.trim();
+  if (!peerUrl || !syncDestPath) return;
+
+  syncButton.disabled = true;
+  syncStatusEl.textContent = "syncing…";
+
+  try {
+    const res = await fetch(`${ENGINE_URL}/sync/pull`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ peerUrl, localFolderPath: syncDestPath }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `sync failed: ${res.status}`);
+
+    syncStatusEl.textContent = `Done — ${body.applied} file(s) updated, ${body.unchanged} already up to date.`;
+  } catch (err) {
+    syncStatusEl.textContent = `Error: ${(err as Error).message}`;
+  } finally {
+    updateSyncButtonState();
+  }
+});
+
+// ---- boot ----
+
 checkEngineHealth();
+pollPeers();
+setInterval(pollPeers, 2000);

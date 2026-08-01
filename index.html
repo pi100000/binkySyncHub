@@ -14,13 +14,30 @@
       </header>
 
       <section>
-        <button id="pick-folder">Choose a folder</button>
-        <p id="folder-path" class="muted"></p>
+        <h2>Share a folder</h2>
+        <p class="muted">Let friends on your network pull files from this folder.</p>
+        <button id="pick-share-folder">Choose folder to share</button>
+        <p id="share-path" class="muted"></p>
+        <ul id="share-file-list"></ul>
       </section>
 
       <section>
-        <h2>Files</h2>
-        <ul id="file-list"></ul>
+        <h2>Friends on this network</h2>
+        <ul id="peer-list" class="muted">
+          <li>searching…</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Sync from a friend</h2>
+        <label class="field">
+          Peer address
+          <input id="peer-url-input" placeholder="http://192.168.1.23:4021" />
+        </label>
+        <button id="pick-sync-folder">Choose destination folder</button>
+        <p id="sync-path" class="muted"></p>
+        <button id="sync-button" disabled>Sync now</button>
+        <p id="sync-status" class="muted"></p>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>

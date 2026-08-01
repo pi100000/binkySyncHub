@@ -1,38 +1,72 @@
-// Transfer module — NOT YET IMPLEMENTED.
+// Transfer module — real implementation, whole-file only (per our v1
+// decision — no chunking/resuming, that's a deliberate later upgrade).
 //
-// Plan for v1 (whole-file transfer, per our discussion): each engine
-// instance runs a small HTTP server. To pull a file, a peer just does
-// GET /files/<path> against the source peer's address and streams the
-// response to disk. No chunking, no resuming — that's a deliberate v2
-// upgrade, not a v1 requirement.
-//
-// serveFiles() is the source side (answers GET /files/*).
-// pullFile() is the target side (fetches one file from a peer).
+// The source side (serving files) lives in api/server.ts as a plain
+// GET /files/<path> route, since it needs to share the same HTTP server
+// and "what folder am I sharing" state as the rest of the API. This
+// file owns the parts that are genuinely transfer-specific: safely
+// resolving a relative path against a root (used by both directions,
+// to stop a malicious/buggy peer from requesting or writing outside the
+// shared folder), and the target side — pulling a diff's worth of
+// changes from a peer and applying them to a local folder.
 
-import type { Peer, DiffEntry } from "../types.js";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { dirname, join, normalize, sep } from "node:path";
+import type { DiffEntry } from "../types.js";
+
+/**
+ * Resolve a relative path against a root, refusing to leave that root
+ * (blocks "../../etc/passwd"-style traversal from either a malicious
+ * peer or a buggy manifest entry).
+ */
+export function safeJoin(root: string, relPath: string): string {
+  const normalizedRoot = normalize(root);
+  const target = normalize(join(normalizedRoot, relPath));
+  if (target !== normalizedRoot && !target.startsWith(normalizedRoot + sep)) {
+    throw new Error(`Refusing to access path outside root: ${relPath}`);
+  }
+  return target;
+}
+
+/** Encode a relative path for use in a URL, preserving directory separators. */
+export function encodePathForUrl(relPath: string): string {
+  return relPath.split("/").map(encodeURIComponent).join("/");
+}
+
+/** Decode a URL path segment back into a relative file path. */
+export function decodeUrlPath(urlPath: string): string {
+  return urlPath.split("/").map(decodeURIComponent).join("/");
+}
 
 export interface TransferService {
-  /** Start serving this folder's files to other peers. Returns the port it's listening on. */
-  serveFiles(rootPath: string): Promise<number>;
-  /** Pull every changed file in a diff from a peer, into localRootPath. */
-  pullChanges(peer: Peer, changes: DiffEntry[], localRootPath: string): Promise<void>;
+  /** Pull every changed file in a diff from a peer's engine, into localRootPath. */
+  pullChanges(peerUrl: string, changes: DiffEntry[], localRootPath: string): Promise<void>;
 }
 
 export function createTransferService(): TransferService {
   return {
-    async serveFiles(rootPath) {
-      // TODO: start an HTTP server (e.g. via node:http) that streams
-      // files from rootPath, guarding against path traversal.
-      console.log(`[transfer] stub — would serve files from ${rootPath}`);
-      return 0;
-    },
-    async pullChanges(peer, changes, localRootPath) {
-      // TODO: for each "add"/"update" entry, GET the file from
-      // peer.address and write it under localRootPath. For "remove",
-      // delete the local file.
-      console.log(
-        `[transfer] stub — would pull ${changes.length} change(s) from ${peer.displayName} into ${localRootPath}`,
-      );
+    async pullChanges(peerUrl, changes, localRootPath) {
+      for (const change of changes) {
+        const localPath = safeJoin(localRootPath, change.path);
+
+        if (change.action === "remove") {
+          await unlink(localPath).catch(() => {
+            // Already gone, or never existed locally — fine either way.
+          });
+          continue;
+        }
+
+        // "add" or "update" — both mean "fetch the current version".
+        const url = `${peerUrl}/files/${encodePathForUrl(change.path)}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`Failed to fetch "${change.path}" from ${peerUrl}: HTTP ${res.status}`);
+        }
+
+        const bytes = Buffer.from(await res.arrayBuffer());
+        await mkdir(dirname(localPath), { recursive: true });
+        await writeFile(localPath, bytes);
+      }
     },
   };
 }

@@ -1,7 +1,7 @@
 // Manifest module — the core of "diffing" as we discussed:
 // walk a folder -> hash every file -> compare two such lists.
 
-import { readdir, stat } from "node:fs/promises";
+import { readdir, stat, mkdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { hashFile } from "../hashing/index.js";
 import type { Manifest, ManifestEntry, DiffResult, DiffEntry } from "../types.js";
@@ -26,8 +26,14 @@ async function walk(root: string, dir: string = root): Promise<string[]> {
   return files;
 }
 
-/** Build a manifest for a folder: hash every file inside it. */
+/**
+ * Build a manifest for a folder: hash every file inside it.
+ * Creates the folder if it doesn't exist yet (so a fresh sync
+ * destination that hasn't been created starts as a valid, empty manifest
+ * instead of throwing).
+ */
 export async function buildManifest(rootPath: string): Promise<Manifest> {
+  await mkdir(rootPath, { recursive: true });
   const filePaths = await walk(rootPath);
 
   const entries: ManifestEntry[] = await Promise.all(
