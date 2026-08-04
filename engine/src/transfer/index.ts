@@ -3,12 +3,12 @@
 //
 // The source side (serving files) lives in api/server.ts as a plain
 // GET /files/<path> route, since it needs to share the same HTTP server
-// and "what folder am I sharing" state as the rest of the API. This
-// file owns the parts that are genuinely transfer-specific: safely
-// resolving a relative path against a root (used by both directions,
-// to stop a malicious/buggy peer from requesting or writing outside the
-// shared folder), and the target side — pulling a diff's worth of
-// changes from a peer and applying them to a local folder.
+// and "what am I sharing" state as the rest of the API. This file owns
+// the parts that are genuinely transfer-specific: safely resolving a
+// relative path against a root, and the target side — pulling a diff's
+// worth of changes from a peer and applying them to a local folder,
+// reporting progress as it goes so the UI can show something better
+// than a frozen screen.
 
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, sep } from "node:path";
@@ -38,15 +38,34 @@ export function decodeUrlPath(urlPath: string): string {
   return urlPath.split("/").map(decodeURIComponent).join("/");
 }
 
+export interface PullProgress {
+  completed: number;
+  total: number;
+  currentFile: string;
+}
+
 export interface TransferService {
-  /** Pull every changed file in a diff from a peer's engine, into localRootPath. */
-  pullChanges(peerUrl: string, changes: DiffEntry[], localRootPath: string): Promise<void>;
+  /**
+   * Pull every changed file in `changes` from a peer's engine, into
+   * localRootPath. Changes are applied one at a time (not in parallel)
+   * — deliberately simple, and it means onProgress fires in a clean,
+   * predictable sequence the UI can just display as-is.
+   */
+  pullChanges(
+    peerUrl: string,
+    changes: DiffEntry[],
+    localRootPath: string,
+    onProgress?: (progress: PullProgress) => void,
+  ): Promise<void>;
 }
 
 export function createTransferService(): TransferService {
   return {
-    async pullChanges(peerUrl, changes, localRootPath) {
-      for (const change of changes) {
+    async pullChanges(peerUrl, changes, localRootPath, onProgress) {
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i];
+        onProgress?.({ completed: i, total: changes.length, currentFile: change.path });
+
         const localPath = safeJoin(localRootPath, change.path);
 
         if (change.action === "remove") {
@@ -67,6 +86,8 @@ export function createTransferService(): TransferService {
         await mkdir(dirname(localPath), { recursive: true });
         await writeFile(localPath, bytes);
       }
+
+      onProgress?.({ completed: changes.length, total: changes.length, currentFile: "" });
     },
   };
 }

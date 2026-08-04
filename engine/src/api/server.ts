@@ -11,17 +11,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { buildManifest, diffManifests } from "../manifest/index.js";
+import { randomUUID } from "node:crypto";
+import { buildManifest, buildManifestFromFiles, diffManifests } from "../manifest/index.js";
 import { safeJoin, decodeUrlPath, createTransferService } from "../transfer/index.js";
 import type { DiscoveryService } from "../discovery/index.js";
-import type { Manifest } from "../types.js";
+import type { Manifest, DiffEntry } from "../types.js";
 
-// The UI runs in a Tauri webview on http://localhost:1420 (Vite's dev
-// server), while the engine listens on a different port (127.0.0.1:4021)
-// — different port means different origin, so the browser enforces CORS
-// even though both are "localhost". This is a local, single-user API
-// with no cookies/credentials involved, so a permissive wildcard is fine
-// here (this isn't a public-facing server).
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -57,15 +52,30 @@ export interface ApiServerDeps {
   discovery: DiscoveryService;
 }
 
+interface SharedState {
+  manifest: Manifest;
+  /** relPath -> absolute path on disk, or null if not shared/not found. */
+  resolvePath: (relPath: string) => string | null;
+}
+
+type SyncJobStatus = "running" | "done" | "error";
+
+interface SyncJob {
+  id: string;
+  status: SyncJobStatus;
+  total: number;
+  completed: number;
+  currentFile: string;
+  applied: number;
+  unchanged: number;
+  error?: string;
+}
+
 export function startApiServer(port: number, deps: ApiServerDeps) {
   const transfer = createTransferService();
 
-  // The one piece of state this server holds: which folder (if any)
-  // this instance is currently sharing, and a cached manifest of it so
-  // peers hitting GET /share/manifest repeatedly don't force a full
-  // re-hash every time. /share rebuilds this cache; nothing else does.
-  let sharedRoot: string | null = null;
-  let sharedManifest: Manifest | null = null;
+  let shared: SharedState | null = null;
+  const jobs = new Map<string, SyncJob>();
 
   const server = createServer(async (req, res) => {
     try {
@@ -85,46 +95,50 @@ export function startApiServer(port: number, deps: ApiServerDeps) {
         return sendJson(res, 200, manifest);
       }
 
-      if (req.method === "POST" && req.url === "/manifest/diff") {
-        const { source, target } = await readJsonBody<{ source: unknown; target: unknown }>(req);
-        if (!source || !target) {
-          return sendJson(res, 400, { error: "source and target manifests are required" });
-        }
-        const diff = diffManifests(source as Manifest, target as Manifest);
-        return sendJson(res, 200, diff);
-      }
-
-      // Start sharing a folder: hash it now, cache the manifest, and
-      // start answering GET /files/* out of it. This is the "one-way
-      // source of truth" role from our architecture discussion — one
-      // friend shares, others pull.
+      // Start sharing either a whole folder or an explicit list of
+      // individual files. Either way, `shared` ends up with a manifest
+      // plus a way to resolve a relative path back to a real file.
       if (req.method === "POST" && req.url === "/share") {
-        const { folderPath } = await readJsonBody<{ folderPath: string }>(req);
-        if (!folderPath) return sendJson(res, 400, { error: "folderPath is required" });
-        sharedRoot = folderPath;
-        sharedManifest = await buildManifest(folderPath);
-        return sendJson(res, 200, { sharing: sharedRoot, manifest: sharedManifest });
+        const { folderPath, filePaths } = await readJsonBody<{
+          folderPath?: string;
+          filePaths?: string[];
+        }>(req);
+
+        if (folderPath) {
+          const manifest = await buildManifest(folderPath);
+          shared = {
+            manifest,
+            resolvePath: (relPath) => {
+              try {
+                return safeJoin(folderPath, relPath);
+              } catch {
+                return null;
+              }
+            },
+          };
+        } else if (filePaths && filePaths.length > 0) {
+          const { manifest, fileMap } = await buildManifestFromFiles(filePaths);
+          shared = { manifest, resolvePath: (relPath) => fileMap.get(relPath) ?? null };
+        } else {
+          return sendJson(res, 400, { error: "folderPath or filePaths is required" });
+        }
+
+        return sendJson(res, 200, { manifest: shared.manifest });
       }
 
       // What a peer calls to find out what you're sharing right now.
       if (req.method === "GET" && req.url === "/share/manifest") {
-        if (!sharedRoot || !sharedManifest) {
-          return sendJson(res, 404, { error: "not currently sharing a folder" });
-        }
-        return sendJson(res, 200, sharedManifest);
+        if (!shared) return sendJson(res, 404, { error: "not currently sharing anything" });
+        return sendJson(res, 200, shared.manifest);
       }
 
       // What a peer calls to actually fetch one file's bytes.
       if (req.method === "GET" && req.url?.startsWith("/files/")) {
-        if (!sharedRoot) return sendJson(res, 404, { error: "not currently sharing a folder" });
+        if (!shared) return sendJson(res, 404, { error: "not currently sharing anything" });
 
         const relPath = decodeUrlPath(req.url.slice("/files/".length));
-        let absolutePath: string;
-        try {
-          absolutePath = safeJoin(sharedRoot, relPath);
-        } catch {
-          return sendJson(res, 400, { error: "invalid path" });
-        }
+        const absolutePath = shared.resolvePath(relPath);
+        if (!absolutePath) return sendJson(res, 404, { error: "file not shared" });
 
         try {
           const fileStat = await stat(absolutePath);
@@ -145,10 +159,10 @@ export function startApiServer(port: number, deps: ApiServerDeps) {
         return sendJson(res, 200, { peers: deps.discovery.getKnownPeers() });
       }
 
-      // The actual sync: pull whatever's changed from a peer into a
-      // local folder. One-way, per our v1 decision — the peer's copy
-      // is the truth, localFolderPath ends up matching it exactly.
-      if (req.method === "POST" && req.url === "/sync/pull") {
+      // Step 1 of syncing: show what WOULD change, without touching
+      // anything yet. The UI uses this to render a checklist so people
+      // can see (and deselect) individual files before anything moves.
+      if (req.method === "POST" && req.url === "/sync/preview") {
         const { peerUrl, localFolderPath } = await readJsonBody<{
           peerUrl: string;
           localFolderPath: string;
@@ -167,13 +181,62 @@ export function startApiServer(port: number, deps: ApiServerDeps) {
         const targetManifest = await buildManifest(localFolderPath);
         const diff = diffManifests(sourceManifest, targetManifest);
 
-        await transfer.pullChanges(peerUrl, diff.changes, localFolderPath);
+        return sendJson(res, 200, diff);
+      }
 
-        return sendJson(res, 200, {
-          applied: diff.changes.length,
-          unchanged: diff.unchangedCount,
-          changes: diff.changes,
-        });
+      // Step 2: actually apply a (possibly filtered-down) list of
+      // changes. Runs as a background job so the request returns
+      // immediately — the UI polls /sync/jobs/:id for progress instead
+      // of blocking on one long request, which is also what lets a big
+      // sync show real progress instead of a frozen screen.
+      if (req.method === "POST" && req.url === "/sync/apply") {
+        const { peerUrl, localFolderPath, changes } = await readJsonBody<{
+          peerUrl: string;
+          localFolderPath: string;
+          changes: DiffEntry[];
+        }>(req);
+        if (!peerUrl || !localFolderPath || !changes) {
+          return sendJson(res, 400, {
+            error: "peerUrl, localFolderPath, and changes are required",
+          });
+        }
+
+        const jobId = randomUUID();
+        const job: SyncJob = {
+          id: jobId,
+          status: "running",
+          total: changes.length,
+          completed: 0,
+          currentFile: "",
+          applied: 0,
+          unchanged: 0,
+        };
+        jobs.set(jobId, job);
+
+        // Deliberately not awaited — this runs in the background while
+        // we respond with the job id right away.
+        transfer
+          .pullChanges(peerUrl, changes, localFolderPath, (progress) => {
+            job.completed = progress.completed;
+            job.currentFile = progress.currentFile;
+          })
+          .then(() => {
+            job.status = "done";
+            job.applied = changes.length;
+          })
+          .catch((err) => {
+            job.status = "error";
+            job.error = (err as Error).message;
+          });
+
+        return sendJson(res, 202, { jobId });
+      }
+
+      if (req.method === "GET" && req.url?.startsWith("/sync/jobs/")) {
+        const jobId = req.url.slice("/sync/jobs/".length);
+        const job = jobs.get(jobId);
+        if (!job) return sendJson(res, 404, { error: "unknown job id" });
+        return sendJson(res, 200, job);
       }
 
       sendJson(res, 404, { error: "not found" });

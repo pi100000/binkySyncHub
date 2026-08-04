@@ -15,9 +15,16 @@ use tauri::Manager;
 struct EngineProcess(Mutex<Option<Child>>);
 
 fn spawn_engine() -> Option<Child> {
+    // On Windows, `npx` is actually `npx.cmd` — a batch-file shim, not a
+    // real .exe. Rust's Command talks to CreateProcess directly, which
+    // (unlike a shell prompt) doesn't auto-resolve .cmd/.bat files, so
+    // Command::new("npx") silently fails to find anything on Windows.
+    // Unix doesn't have this problem — npx there is a real executable.
+    let npx = if cfg!(target_os = "windows") { "npx.cmd" } else { "npx" };
+
     // Assumes this binary runs with its working directory at
     // src-tauri/, so ../engine points at the engine package.
-    Command::new("npx")
+    Command::new(npx)
         .args(["tsx", "src/index.ts"])
         .current_dir("../engine")
         .spawn()

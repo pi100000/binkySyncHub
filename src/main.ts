@@ -25,9 +25,34 @@ interface Peer {
   address?: string;
 }
 
+type DiffAction = "add" | "update" | "remove";
+
+interface DiffEntry {
+  path: string;
+  action: DiffAction;
+  entry?: ManifestEntry;
+}
+
+interface DiffResult {
+  changes: DiffEntry[];
+  unchangedCount: number;
+}
+
+interface SyncJob {
+  id: string;
+  status: "running" | "done" | "error";
+  total: number;
+  completed: number;
+  currentFile: string;
+  applied: number;
+  unchanged: number;
+  error?: string;
+}
+
 const statusEl = document.querySelector<HTMLParagraphElement>("#engine-status")!;
 
-const pickShareButton = document.querySelector<HTMLButtonElement>("#pick-share-folder")!;
+const pickShareFolderButton = document.querySelector<HTMLButtonElement>("#pick-share-folder")!;
+const pickShareFilesButton = document.querySelector<HTMLButtonElement>("#pick-share-files")!;
 const sharePathEl = document.querySelector<HTMLParagraphElement>("#share-path")!;
 const shareFileListEl = document.querySelector<HTMLUListElement>("#share-file-list")!;
 
@@ -36,10 +61,23 @@ const peerListEl = document.querySelector<HTMLUListElement>("#peer-list")!;
 const peerUrlInput = document.querySelector<HTMLInputElement>("#peer-url-input")!;
 const pickSyncButton = document.querySelector<HTMLButtonElement>("#pick-sync-folder")!;
 const syncPathEl = document.querySelector<HTMLParagraphElement>("#sync-path")!;
-const syncButton = document.querySelector<HTMLButtonElement>("#sync-button")!;
+const previewButton = document.querySelector<HTMLButtonElement>("#preview-button")!;
+
+const previewPanelEl = document.querySelector<HTMLDivElement>("#preview-panel")!;
+const previewSummaryEl = document.querySelector<HTMLParagraphElement>("#preview-summary")!;
+const previewListEl = document.querySelector<HTMLUListElement>("#preview-list")!;
+const selectAllButton = document.querySelector<HTMLButtonElement>("#select-all-button")!;
+const selectNoneButton = document.querySelector<HTMLButtonElement>("#select-none-button")!;
+const applyButton = document.querySelector<HTMLButtonElement>("#apply-button")!;
+
+const progressPanelEl = document.querySelector<HTMLDivElement>("#progress-panel")!;
+const progressBarEl = document.querySelector<HTMLProgressElement>("#sync-progress")!;
+const progressLabelEl = document.querySelector<HTMLParagraphElement>("#sync-progress-label")!;
+
 const syncStatusEl = document.querySelector<HTMLParagraphElement>("#sync-status")!;
 
 let syncDestPath: string | null = null;
+let lastPreview: DiffEntry[] = [];
 
 // ---- engine health ----
 
@@ -57,8 +95,8 @@ async function checkEngineHealth() {
 
 // ---- sharing ----
 
-function renderManifest(listEl: HTMLUListElement, manifest: Manifest) {
-  listEl.innerHTML = "";
+function renderShareManifest(manifest: Manifest) {
+  shareFileListEl.innerHTML = "";
   for (const entry of manifest.entries) {
     const li = document.createElement("li");
     const name = document.createElement("span");
@@ -67,29 +105,40 @@ function renderManifest(listEl: HTMLUListElement, manifest: Manifest) {
     hash.className = "hash";
     hash.textContent = entry.hash.slice(0, 14) + "…";
     li.append(name, hash);
-    listEl.append(li);
+    shareFileListEl.append(li);
   }
 }
 
-pickShareButton.addEventListener("click", async () => {
-  const selected = await open({ directory: true, multiple: false });
-  if (!selected || Array.isArray(selected)) return;
-
-  sharePathEl.textContent = `Sharing: ${selected}`;
+async function shareRequest(body: { folderPath?: string; filePaths?: string[] }) {
   shareFileListEl.innerHTML = "<li>hashing…</li>";
-
   try {
     const res = await fetch(`${ENGINE_URL}/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderPath: selected }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`share failed: ${res.status}`);
     const { manifest } = (await res.json()) as { manifest: Manifest };
-    renderManifest(shareFileListEl, manifest);
+    renderShareManifest(manifest);
   } catch (err) {
     shareFileListEl.innerHTML = `<li>Error: ${(err as Error).message}</li>`;
   }
+}
+
+pickShareFolderButton.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected || Array.isArray(selected)) return;
+  sharePathEl.textContent = `Sharing folder: ${selected}`;
+  await shareRequest({ folderPath: selected });
+});
+
+pickShareFilesButton.addEventListener("click", async () => {
+  const selected = await open({ directory: false, multiple: true });
+  if (!selected) return;
+  const filePaths = Array.isArray(selected) ? selected : [selected];
+  if (filePaths.length === 0) return;
+  sharePathEl.textContent = `Sharing ${filePaths.length} file(s)`;
+  await shareRequest({ filePaths });
 });
 
 // ---- peer discovery ----
@@ -115,7 +164,7 @@ function renderPeers(peers: Peer[]) {
     li.append(name, address);
     li.addEventListener("click", () => {
       if (peer.address) peerUrlInput.value = peer.address;
-      updateSyncButtonState();
+      updatePreviewButtonState();
     });
     peerListEl.append(li);
   }
@@ -133,44 +182,174 @@ async function pollPeers() {
   }
 }
 
-// ---- syncing ----
+// ---- preview ----
 
-function updateSyncButtonState() {
-  syncButton.disabled = !(peerUrlInput.value.trim() && syncDestPath);
+const ACTION_LABEL: Record<DiffAction, string> = { add: "+", update: "~", remove: "−" };
+
+function updatePreviewButtonState() {
+  previewButton.disabled = !(peerUrlInput.value.trim() && syncDestPath);
 }
 
-peerUrlInput.addEventListener("input", updateSyncButtonState);
+function renderPreview(diff: DiffResult) {
+  lastPreview = diff.changes;
+  previewPanelEl.classList.remove("hidden");
+  progressPanelEl.classList.add("hidden");
+  syncStatusEl.textContent = "";
+
+  previewSummaryEl.textContent =
+    diff.changes.length === 0
+      ? `Already in sync (${diff.unchangedCount} file(s) match).`
+      : `${diff.changes.length} file(s) differ, ${diff.unchangedCount} already match.`;
+
+  previewListEl.innerHTML = "";
+  for (const change of diff.changes) {
+    const li = document.createElement("li");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.dataset.path = change.path;
+
+    const action = document.createElement("span");
+    action.className = `action action-${change.action}`;
+    action.textContent = ACTION_LABEL[change.action];
+    action.title = change.action;
+
+    const path = document.createElement("span");
+    path.className = "path";
+    path.textContent = change.path;
+
+    li.append(checkbox, action, path);
+    previewListEl.append(li);
+  }
+
+  applyButton.disabled = diff.changes.length === 0;
+}
+
+previewButton.addEventListener("click", async () => {
+  const peerUrl = peerUrlInput.value.trim();
+  if (!peerUrl || !syncDestPath) return;
+
+  previewButton.disabled = true;
+  previewSummaryEl.textContent = "";
+  previewListEl.innerHTML = "<li>comparing…</li>";
+  previewPanelEl.classList.remove("hidden");
+
+  try {
+    const res = await fetch(`${ENGINE_URL}/sync/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ peerUrl, localFolderPath: syncDestPath }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `preview failed: ${res.status}`);
+    renderPreview(body as DiffResult);
+  } catch (err) {
+    previewListEl.innerHTML = "";
+    previewSummaryEl.textContent = `Error: ${(err as Error).message}`;
+  } finally {
+    updatePreviewButtonState();
+  }
+});
+
+selectAllButton.addEventListener("click", () => {
+  previewListEl
+    .querySelectorAll<HTMLInputElement>("input[type=checkbox]")
+    .forEach((cb) => (cb.checked = true));
+});
+
+selectNoneButton.addEventListener("click", () => {
+  previewListEl
+    .querySelectorAll<HTMLInputElement>("input[type=checkbox]")
+    .forEach((cb) => (cb.checked = false));
+});
+
+// ---- apply + progress ----
+
+function selectedChanges(): DiffEntry[] {
+  const checkedPaths = new Set(
+    [...previewListEl.querySelectorAll<HTMLInputElement>("input[type=checkbox]:checked")].map(
+      (cb) => cb.dataset.path,
+    ),
+  );
+  return lastPreview.filter((change) => checkedPaths.has(change.path));
+}
+
+async function pollJob(jobId: string) {
+  while (true) {
+    const res = await fetch(`${ENGINE_URL}/sync/jobs/${jobId}`);
+    if (!res.ok) {
+      syncStatusEl.textContent = "Lost track of the sync job — try again.";
+      return;
+    }
+    const job = (await res.json()) as SyncJob;
+
+    const pct = job.total === 0 ? 100 : Math.round((job.completed / job.total) * 100);
+    progressBarEl.value = pct;
+    progressLabelEl.textContent =
+      job.status === "running"
+        ? `${job.completed} / ${job.total} — ${job.currentFile}`
+        : `${job.completed} / ${job.total}`;
+
+    if (job.status === "done") {
+      syncStatusEl.textContent = `Done — ${job.applied} file(s) synced.`;
+      progressPanelEl.classList.add("hidden");
+      return;
+    }
+    if (job.status === "error") {
+      syncStatusEl.textContent = `Error: ${job.error}`;
+      progressPanelEl.classList.add("hidden");
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+applyButton.addEventListener("click", async () => {
+  const peerUrl = peerUrlInput.value.trim();
+  if (!peerUrl || !syncDestPath) return;
+
+  const changes = selectedChanges();
+  if (changes.length === 0) {
+    syncStatusEl.textContent = "Nothing selected.";
+    return;
+  }
+
+  applyButton.disabled = true;
+  syncStatusEl.textContent = "";
+  progressPanelEl.classList.remove("hidden");
+  progressBarEl.value = 0;
+  progressLabelEl.textContent = `0 / ${changes.length}`;
+
+  try {
+    const res = await fetch(`${ENGINE_URL}/sync/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ peerUrl, localFolderPath: syncDestPath, changes }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `sync failed: ${res.status}`);
+    await pollJob(body.jobId);
+  } catch (err) {
+    syncStatusEl.textContent = `Error: ${(err as Error).message}`;
+    progressPanelEl.classList.add("hidden");
+  } finally {
+    applyButton.disabled = false;
+  }
+});
+
+// ---- destination folder ----
+
+peerUrlInput.addEventListener("input", updatePreviewButtonState);
 
 pickSyncButton.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });
   if (!selected || Array.isArray(selected)) return;
   syncDestPath = selected;
   syncPathEl.textContent = `Destination: ${selected}`;
-  updateSyncButtonState();
-});
-
-syncButton.addEventListener("click", async () => {
-  const peerUrl = peerUrlInput.value.trim();
-  if (!peerUrl || !syncDestPath) return;
-
-  syncButton.disabled = true;
-  syncStatusEl.textContent = "syncing…";
-
-  try {
-    const res = await fetch(`${ENGINE_URL}/sync/pull`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ peerUrl, localFolderPath: syncDestPath }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error ?? `sync failed: ${res.status}`);
-
-    syncStatusEl.textContent = `Done — ${body.applied} file(s) updated, ${body.unchanged} already up to date.`;
-  } catch (err) {
-    syncStatusEl.textContent = `Error: ${(err as Error).message}`;
-  } finally {
-    updateSyncButtonState();
-  }
+  previewPanelEl.classList.add("hidden");
+  updatePreviewButtonState();
 });
 
 // ---- boot ----

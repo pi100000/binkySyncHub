@@ -14,9 +14,12 @@
       </header>
 
       <section>
-        <h2>Share a folder</h2>
-        <p class="muted">Let friends on your network pull files from this folder.</p>
-        <button id="pick-share-folder">Choose folder to share</button>
+        <h2>Share</h2>
+        <p class="muted">Let friends on your network pull from this.</p>
+        <div class="button-row">
+          <button id="pick-share-folder">Share a folder</button>
+          <button id="pick-share-files">Share individual files</button>
+        </div>
         <p id="share-path" class="muted"></p>
         <ul id="share-file-list"></ul>
       </section>
@@ -36,7 +39,24 @@
         </label>
         <button id="pick-sync-folder">Choose destination folder</button>
         <p id="sync-path" class="muted"></p>
-        <button id="sync-button" disabled>Sync now</button>
+
+        <button id="preview-button" disabled>Preview changes</button>
+
+        <div id="preview-panel" class="hidden">
+          <p id="preview-summary" class="muted"></p>
+          <ul id="preview-list"></ul>
+          <div class="button-row">
+            <button id="select-all-button">Select all</button>
+            <button id="select-none-button">Select none</button>
+          </div>
+          <button id="apply-button">Sync selected</button>
+        </div>
+
+        <div id="progress-panel" class="hidden">
+          <progress id="sync-progress" max="100" value="0"></progress>
+          <p id="sync-progress-label" class="muted"></p>
+        </div>
+
         <p id="sync-status" class="muted"></p>
       </section>
     </main>
