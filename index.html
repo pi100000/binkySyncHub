@@ -44,7 +44,22 @@
 
         <div id="preview-panel" class="hidden">
           <p id="preview-summary" class="muted"></p>
-          <ul id="preview-list"></ul>
+
+          <div id="preview-checklists">
+            <div id="incoming-group">
+              <h3>From your friend</h3>
+              <ul id="incoming-list"></ul>
+            </div>
+
+            <div id="extra-group" class="hidden">
+              <h3>Only in your folder</h3>
+              <p class="muted small">
+                Your friend doesn't have these. They're left alone unless you check them.
+              </p>
+              <ul id="extra-list"></ul>
+            </div>
+          </div>
+
           <div class="button-row">
             <button id="select-all-button">Select all</button>
             <button id="select-none-button">Select none</button>

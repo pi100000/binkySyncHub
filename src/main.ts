@@ -65,7 +65,11 @@ const previewButton = document.querySelector<HTMLButtonElement>("#preview-button
 
 const previewPanelEl = document.querySelector<HTMLDivElement>("#preview-panel")!;
 const previewSummaryEl = document.querySelector<HTMLParagraphElement>("#preview-summary")!;
-const previewListEl = document.querySelector<HTMLUListElement>("#preview-list")!;
+const checklistsEl = document.querySelector<HTMLDivElement>("#preview-checklists")!;
+const incomingGroupEl = document.querySelector<HTMLDivElement>("#incoming-group")!;
+const incomingListEl = document.querySelector<HTMLUListElement>("#incoming-list")!;
+const extraGroupEl = document.querySelector<HTMLDivElement>("#extra-group")!;
+const extraListEl = document.querySelector<HTMLUListElement>("#extra-list")!;
 const selectAllButton = document.querySelector<HTMLButtonElement>("#select-all-button")!;
 const selectNoneButton = document.querySelector<HTMLButtonElement>("#select-none-button")!;
 const applyButton = document.querySelector<HTMLButtonElement>("#apply-button")!;
@@ -190,40 +194,59 @@ function updatePreviewButtonState() {
   previewButton.disabled = !(peerUrlInput.value.trim() && syncDestPath);
 }
 
+function renderChecklistItem(listEl: HTMLUListElement, change: DiffEntry, checkedByDefault: boolean) {
+  const li = document.createElement("li");
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = checkedByDefault;
+  checkbox.dataset.path = change.path;
+
+  const action = document.createElement("span");
+  action.className = `action action-${change.action}`;
+  action.textContent = ACTION_LABEL[change.action];
+  action.title = change.action;
+
+  const path = document.createElement("span");
+  path.className = "path";
+  path.textContent = change.path;
+
+  li.append(checkbox, action, path);
+  listEl.append(li);
+}
+
 function renderPreview(diff: DiffResult) {
   lastPreview = diff.changes;
   previewPanelEl.classList.remove("hidden");
   progressPanelEl.classList.add("hidden");
   syncStatusEl.textContent = "";
 
-  previewSummaryEl.textContent =
-    diff.changes.length === 0
-      ? `Already in sync (${diff.unchangedCount} file(s) match).`
-      : `${diff.changes.length} file(s) differ, ${diff.unchangedCount} already match.`;
+  // "remove" means "exists in your folder, not in your friend's" — these
+  // are YOUR files, not incoming ones, so they get their own group and
+  // are unchecked by default. Nothing of yours is touched unless you
+  // explicitly opt in.
+  const incoming = diff.changes.filter((c) => c.action === "add" || c.action === "update");
+  const extra = diff.changes.filter((c) => c.action === "remove");
 
-  previewListEl.innerHTML = "";
-  for (const change of diff.changes) {
-    const li = document.createElement("li");
+  const parts: string[] = [];
+  parts.push(
+    incoming.length > 0
+      ? `${incoming.length} file(s) to receive from your friend`
+      : "Nothing new to receive from your friend",
+  );
+  if (extra.length > 0) parts.push(`${extra.length} file(s) only in your folder`);
+  parts.push(`${diff.unchangedCount} already match`);
+  previewSummaryEl.textContent = parts.join(" · ");
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = true;
-    checkbox.dataset.path = change.path;
+  incomingListEl.innerHTML = "";
+  for (const change of incoming) renderChecklistItem(incomingListEl, change, true);
+  incomingGroupEl.classList.toggle("hidden", incoming.length === 0);
 
-    const action = document.createElement("span");
-    action.className = `action action-${change.action}`;
-    action.textContent = ACTION_LABEL[change.action];
-    action.title = change.action;
+  extraListEl.innerHTML = "";
+  for (const change of extra) renderChecklistItem(extraListEl, change, false);
+  extraGroupEl.classList.toggle("hidden", extra.length === 0);
 
-    const path = document.createElement("span");
-    path.className = "path";
-    path.textContent = change.path;
-
-    li.append(checkbox, action, path);
-    previewListEl.append(li);
-  }
-
-  applyButton.disabled = diff.changes.length === 0;
+  applyButton.disabled = incoming.length === 0 && extra.length === 0;
 }
 
 previewButton.addEventListener("click", async () => {
@@ -231,8 +254,9 @@ previewButton.addEventListener("click", async () => {
   if (!peerUrl || !syncDestPath) return;
 
   previewButton.disabled = true;
-  previewSummaryEl.textContent = "";
-  previewListEl.innerHTML = "<li>comparing…</li>";
+  previewSummaryEl.textContent = "comparing…";
+  incomingGroupEl.classList.add("hidden");
+  extraGroupEl.classList.add("hidden");
   previewPanelEl.classList.remove("hidden");
 
   try {
@@ -245,7 +269,6 @@ previewButton.addEventListener("click", async () => {
     if (!res.ok) throw new Error(body.error ?? `preview failed: ${res.status}`);
     renderPreview(body as DiffResult);
   } catch (err) {
-    previewListEl.innerHTML = "";
     previewSummaryEl.textContent = `Error: ${(err as Error).message}`;
   } finally {
     updatePreviewButtonState();
@@ -253,13 +276,13 @@ previewButton.addEventListener("click", async () => {
 });
 
 selectAllButton.addEventListener("click", () => {
-  previewListEl
+  checklistsEl
     .querySelectorAll<HTMLInputElement>("input[type=checkbox]")
     .forEach((cb) => (cb.checked = true));
 });
 
 selectNoneButton.addEventListener("click", () => {
-  previewListEl
+  checklistsEl
     .querySelectorAll<HTMLInputElement>("input[type=checkbox]")
     .forEach((cb) => (cb.checked = false));
 });
@@ -268,7 +291,7 @@ selectNoneButton.addEventListener("click", () => {
 
 function selectedChanges(): DiffEntry[] {
   const checkedPaths = new Set(
-    [...previewListEl.querySelectorAll<HTMLInputElement>("input[type=checkbox]:checked")].map(
+    [...checklistsEl.querySelectorAll<HTMLInputElement>("input[type=checkbox]:checked")].map(
       (cb) => cb.dataset.path,
     ),
   );

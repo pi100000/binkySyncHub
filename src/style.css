@@ -151,16 +151,31 @@ ul {
   margin-top: 1rem;
 }
 
-#preview-list {
-  max-height: 260px;
+#preview-checklists h3 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #999;
+  margin: 1rem 0 0.35rem;
+}
+
+.small {
+  font-size: 0.8rem;
+  margin: 0 0 0.4rem;
+}
+
+#incoming-list,
+#extra-list {
+  max-height: 220px;
   overflow-y: auto;
   font-family: ui-monospace, monospace;
-  margin: 0.75rem 0;
+  margin: 0 0 0.5rem;
   border: 1px solid #333;
   border-radius: 6px;
 }
 
-#preview-list li {
+#incoming-list li,
+#extra-list li {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -168,11 +183,13 @@ ul {
   border-bottom: 1px solid #2a2a2a;
 }
 
-#preview-list li:last-child {
+#incoming-list li:last-child,
+#extra-list li:last-child {
   border-bottom: none;
 }
 
-#preview-list .action {
+#incoming-list .action,
+#extra-list .action {
   width: 1.4rem;
   text-align: center;
   flex-shrink: 0;
@@ -190,7 +207,8 @@ ul {
   color: #d23f3f;
 }
 
-#preview-list .path {
+#incoming-list .path,
+#extra-list .path {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
