@@ -1,93 +1,66 @@
 # Peer Sync
 
-Sync mods, configs, and (eventually) any folder with your friends, over LAN — no cloud
-storage, no accounts, no port-forwarding.
+Share files/folders with your friends on the same network. Click share, they see it
+appear in their app, they click download, it downloads. That's the whole interaction.
 
-## How it's built
+## How it works
 
 ```
 peer-sync/
 ├── engine/            The sync engine. Plain Node + TypeScript.
 │   └── src/
-│       ├── types.ts          Shared types — the contract everything else speaks
-│       ├── hashing/          Content hashing (SHA-256 for now, BLAKE3-ready)
-│       ├── manifest/         Walk a folder, hash it, diff two manifests
-│       ├── discovery/        LAN peer discovery — UDP broadcast beacon, working
-│       ├── transfer/         Whole-file transfer — HTTP, working
-│       ├── relay-client/     Internet fallback transport — STUB, not built yet
-│       └── api/server.ts     Local HTTP API — the ONLY thing the UI talks to
-├── src/               The UI. Plain TypeScript + Vite, running inside Tauri's webview.
+│       ├── hashing/      Content hashing (SHA-256)
+│       ├── manifest/     Walk a folder/file list, hash it, diff two manifests
+│       ├── discovery/    LAN peer discovery — UDP broadcast beacon
+│       ├── transfer/     Whole-file HTTP transfer
+│       ├── relay-client/ Internet fallback transport — STUB, not built yet
+│       └── api/server.ts Local HTTP API — the ONLY thing the UI talks to
+├── src/               The UI. Two lists: what you're sharing, what's available.
 ├── src-tauri/         The Rust shell. Spawns the engine, shows the window.
-└── package.json       Root — manages the frontend + Tauri CLI
+└── package.json
 ```
 
-## What's actually working right now
+## The model
 
-- **Discovery** — every engine instance broadcasts itself over UDP and listens for
-  others on the same LAN. No setup, no config — open the app and friends on the same
-  wifi just appear in the list.
-- **Sharing** — pick a folder, click share, and the engine hashes it, caches the
-  manifest, and starts answering file requests from peers.
-- **Syncing** — pick a peer (or paste their address) and a destination folder, hit sync,
-  and the engine fetches that peer's manifest, diffs it against your local folder, and
-  pulls only what's missing or changed — deleting anything you have that they don't.
-  This is one-way sync, on purpose (per our earlier design decision): the peer's copy is
-  the truth, your folder ends up matching it exactly.
+Each engine instance holds a small **catalog** — a list of things you're sharing (add
+folders or files to it any time, they stay listed until you remove them). Peers discover
+each other over LAN and ask each other "what's in your catalog?" (`GET /share/list`).
+Every engine's `/browse` endpoint merges all of that into one list: everything available
+from everyone currently visible, tagged with who it's from.
 
-I tested this end-to-end before handing it over: two engine instances on different
-ports, one sharing a folder, the other syncing from it — new files got added, stale
-files got removed, and identical files were correctly left alone.
+**Downloads always land in an app-managed folder**:
+`~/PeerSyncDownloads/<friend's name>/<item name>/`. This is the thing that makes "just
+click download" safe — since that folder only ever contains what was downloaded from
+that specific friend/item, a download can freely mirror the source exactly (adding,
+updating, *and removing* stale files) without any risk of touching something unrelated.
+No folder picker, no "are you sure" — the destination is never ambiguous because you
+never chose it.
 
-**One thing worth knowing:** the engine now listens on `0.0.0.0` instead of just
-`127.0.0.1`, since other machines on your LAN need to reach it to pull files. That means
-anyone on your network can hit its API while the app is running — fine for a tool you're
-running with friends on trusted networks, but worth keeping in mind if you're ever on a
-network you don't trust.
-
-## What's stubbed, on purpose
-
-`relay-client/` is still just a typed interface with TODOs — that's the piece needed for
-friends who *aren't* on the same network. LAN sync (the common case if you're at a LAN
-party or hosting locally) is fully functional without it.
+Clicking download again on something you already have re-checks it against the source
+and only pulls what's actually changed (or does nothing if it's already up to date) —
+the hashing/diffing underneath is exactly the "only send what's different" system from
+our original design discussion, just now hidden behind a single button.
 
 ## Running it locally
 
-You'll need Node.js and the Rust toolchain (`rustup.rs`) plus your OS's Tauri
-prerequisites — see https://v2.tauri.app/start/prerequisites/ for your platform. Your
-friends **won't** need any of this — they'll just get a normal installer once this is
-packaged for release.
-
 ```bash
-# 1. Install engine deps and try it standalone (no GUI needed for this part)
-cd engine && npm install && npm run dev
-
-# 2. Install frontend deps and run the full desktop app
-cd ..
-npm install
-npm run tauri dev
+cd engine && npm install && npm run dev    # engine standalone, no GUI needed
+# in another terminal:
+cd .. && npm install && npm run tauri dev  # full desktop app
 ```
 
-To test syncing with just one machine (before you've got a friend online to test with),
-run a second engine instance on a different port:
+To test with just one machine, run a second engine on another port and use curl to
+drive it (see the API routes in `engine/src/api/server.ts` — `/share`, `/browse`,
+`/download`, `/sync/jobs/:id`), or run a full second Tauri window once port-configurability
+is added (currently hardcoded to 4021 — ask if you want that changed).
 
-```bash
-cd engine
-ENGINE_PORT=4022 npm run dev
-```
+## What's stubbed, on purpose
 
-Then in the app, use `http://127.0.0.1:4022` as the peer address.
+`relay-client/` — needed for friends who aren't on the same LAN. Not built yet; LAN
+discovery/download is fully functional without it.
 
-## Next steps, roughly in order
+## Next steps
 
-1. **Relay fallback**, for friends not on the same network — a small WebSocket relay
-   server, per our architecture discussion.
-2. **Live sync status in the UI** — right now `/sync/pull` is a single blocking call;
-   for big folders you'll want progress feedback (e.g. via Server-Sent Events or
-   WebSocket instead of a plain POST).
-3. **Auto re-sync** — currently you have to click "Sync now" manually. Watching the
-   shared folder for changes and re-announcing would make this closer to "set and
-   forget."
-4. **Package the engine as a Tauri sidecar binary** so friends get one installer with
-   zero dependencies, instead of relying on `npx` in dev.
-5. **Real design pass** once the aesthetic direction is decided — right now `src/style.css`
-   is intentionally plain.
+1. Relay fallback for non-LAN friends.
+2. Package the engine as a Tauri sidecar binary so friends don't need Node installed.
+3. Real design pass on the UI once the aesthetic direction is decided.

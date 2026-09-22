@@ -20,7 +20,7 @@ h1 {
 
 h2 {
   font-size: 1.05rem;
-  margin-bottom: 0.25rem;
+  margin: 0;
 }
 
 section {
@@ -29,8 +29,11 @@ section {
   border-top: 1px solid #333;
 }
 
-.hidden {
-  display: none;
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
 }
 
 .status {
@@ -51,12 +54,11 @@ section {
 .button-row {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 button {
   font: inherit;
-  padding: 0.5rem 1rem;
+  padding: 0.45rem 0.9rem;
   border-radius: 6px;
   border: 1px solid #ccc;
   background: #f5f5f5;
@@ -72,26 +74,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.field {
-  display: block;
-  font-size: 0.875rem;
-  color: #aaa;
-  margin-bottom: 0.75rem;
-}
-
-.field input {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin-top: 0.35rem;
-  padding: 0.5rem;
-  font: inherit;
-  border-radius: 6px;
-  border: 1px solid #444;
-  background: transparent;
-  color: inherit;
-}
-
 .muted {
   color: #888;
   font-size: 0.875rem;
@@ -100,122 +82,98 @@ button:disabled {
 ul {
   list-style: none;
   padding: 0;
-  font-size: 0.85rem;
+  margin: 0;
 }
 
-#share-file-list {
-  font-family: ui-monospace, monospace;
-}
-
-#share-file-list li {
-  padding: 0.35rem 0;
-  border-bottom: 1px solid #333;
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-#share-file-list .hash {
-  color: #999;
-}
-
-#peer-list li {
-  padding: 0.4rem 0.6rem;
-  margin-bottom: 0.35rem;
-  border: 1px solid #333;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-#peer-list li:hover {
-  background: #1f1f1f;
-}
-
-#peer-list li.empty {
-  cursor: default;
-  border: none;
-  padding: 0.35rem 0;
-}
-
-#peer-list .peer-address {
+.item-list li.empty {
+  padding: 0.5rem 0;
   color: #888;
-  font-family: ui-monospace, monospace;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
 }
 
-#preview-panel,
-#progress-panel {
-  margin-top: 1rem;
-}
-
-#preview-checklists h3 {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #999;
-  margin: 1rem 0 0.35rem;
-}
-
-.small {
-  font-size: 0.8rem;
-  margin: 0 0 0.4rem;
-}
-
-#incoming-list,
-#extra-list {
-  max-height: 220px;
-  overflow-y: auto;
-  font-family: ui-monospace, monospace;
-  margin: 0 0 0.5rem;
-  border: 1px solid #333;
-  border-radius: 6px;
-}
-
-#incoming-list li,
-#extra-list li {
+.item-list li.row {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.3rem 0.6rem;
-  border-bottom: 1px solid #2a2a2a;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid #333;
+  border-radius: 8px;
 }
 
-#incoming-list li:last-child,
-#extra-list li:last-child {
-  border-bottom: none;
-}
-
-#incoming-list .action,
-#extra-list .action {
-  width: 1.4rem;
-  text-align: center;
+.item-list .kind-icon {
+  font-size: 1.3rem;
   flex-shrink: 0;
+  width: 1.6rem;
+  text-align: center;
 }
 
-.action-add {
-  color: #2fa84f;
-}
-
-.action-update {
-  color: #d9a521;
-}
-
-.action-remove {
-  color: #d23f3f;
-}
-
-#incoming-list .path,
-#extra-list .path {
+.item-list .meta {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.item-list .name {
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-progress {
-  width: 100%;
-  height: 0.6rem;
+.item-list .sub {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.icon-button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  font-size: 1.3rem;
+  padding: 0.2rem 0.5rem;
+  line-height: 1;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: #2a2a2a;
+  border-radius: 6px;
+}
+
+.remove-button {
+  color: #d23f3f;
+}
+
+.download-progress {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 140px;
+}
+
+.download-progress progress {
+  flex: 1;
+  height: 0.5rem;
+}
+
+.download-progress .pct {
+  font-size: 0.75rem;
+  color: #888;
+  width: 2.4rem;
+  text-align: right;
+}
+
+.status-badge {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.status-badge.done {
+  color: #2fa84f;
+}
+
+.status-badge.error {
+  color: #d23f3f;
 }

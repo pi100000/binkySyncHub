@@ -14,65 +14,23 @@
       </header>
 
       <section>
-        <h2>Share</h2>
-        <p class="muted">Let friends on your network pull from this.</p>
-        <div class="button-row">
-          <button id="pick-share-folder">Share a folder</button>
-          <button id="pick-share-files">Share individual files</button>
+        <div class="section-head">
+          <h2>Your shared items</h2>
+          <div class="button-row">
+            <button id="share-folder-btn">+ Folder</button>
+            <button id="share-files-btn">+ Files</button>
+          </div>
         </div>
-        <p id="share-path" class="muted"></p>
-        <ul id="share-file-list"></ul>
-      </section>
-
-      <section>
-        <h2>Friends on this network</h2>
-        <ul id="peer-list" class="muted">
-          <li>searching…</li>
+        <ul id="shared-list" class="item-list">
+          <li class="empty">Nothing shared yet.</li>
         </ul>
       </section>
 
       <section>
-        <h2>Sync from a friend</h2>
-        <label class="field">
-          Peer address
-          <input id="peer-url-input" placeholder="http://192.168.1.23:4021" />
-        </label>
-        <button id="pick-sync-folder">Choose destination folder</button>
-        <p id="sync-path" class="muted"></p>
-
-        <button id="preview-button" disabled>Preview changes</button>
-
-        <div id="preview-panel" class="hidden">
-          <p id="preview-summary" class="muted"></p>
-
-          <div id="preview-checklists">
-            <div id="incoming-group">
-              <h3>From your friend</h3>
-              <ul id="incoming-list"></ul>
-            </div>
-
-            <div id="extra-group" class="hidden">
-              <h3>Only in your folder</h3>
-              <p class="muted small">
-                Your friend doesn't have these. They're left alone unless you check them.
-              </p>
-              <ul id="extra-list"></ul>
-            </div>
-          </div>
-
-          <div class="button-row">
-            <button id="select-all-button">Select all</button>
-            <button id="select-none-button">Select none</button>
-          </div>
-          <button id="apply-button">Sync selected</button>
-        </div>
-
-        <div id="progress-panel" class="hidden">
-          <progress id="sync-progress" max="100" value="0"></progress>
-          <p id="sync-progress-label" class="muted"></p>
-        </div>
-
-        <p id="sync-status" class="muted"></p>
+        <h2>Available to download</h2>
+        <ul id="browse-list" class="item-list">
+          <li class="empty">Looking for friends…</li>
+        </ul>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>

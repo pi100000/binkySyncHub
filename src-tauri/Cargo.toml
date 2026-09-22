@@ -1,7 +1,7 @@
 [package]
 name = "peer-sync"
 version = "0.1.0"
-description = "Sync mods, configs, and files with your friends over LAN or relay"
+description = "Share and download files/folders with your friends over LAN"
 edition = "2021"
 
 [build-dependencies]

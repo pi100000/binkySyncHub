@@ -11,16 +11,9 @@
   },
   "app": {
     "windows": [
-      {
-        "title": "Peer Sync",
-        "width": 720,
-        "height": 720,
-        "resizable": true
-      }
+      { "title": "Peer Sync", "width": 640, "height": 720, "resizable": true }
     ],
-    "security": {
-      "csp": null
-    }
+    "security": { "csp": null }
   },
   "bundle": {
     "active": true,
